@@ -27,6 +27,11 @@ const (
 	statePendingDischarge
 )
 
+const (
+	dbusUPowerDeviceInterface = "org.freedesktop.UPower.Device"
+	dbusCallPropertiesGet     = "org.freedesktop.DBus.Properties.Get"
+)
+
 var stateMap = map[uint32]string{
 	stateCharging:         "Charging",
 	stateDischarging:      "Discharging",
@@ -60,6 +65,12 @@ func main() {
 	}
 	defer sessionConn.Close()
 
+	notifier, err := notify.New(sessionConn)
+	if err != nil {
+		slog.Error(err.Error())
+		os.Exit(1)
+	}
+
 	signalChan := make(chan *dbus.Signal, 10)
 	sysConn.Signal(signalChan)
 
@@ -87,38 +98,40 @@ func main() {
 			if len(signal.Body) < 2 {
 				continue
 			}
-			interfaceName, ok := signal.Body[0].(string)
-			if !ok || interfaceName != "org.freedesktop.UPower.Device" {
-				continue
-			}
 			properties, ok := signal.Body[1].(map[string]dbus.Variant)
 			if !ok {
 				continue
 			}
 
-			val, exists := properties["Percentage"]
+			if stateProp, exists := properties["State"]; exists {
+				if state, ok := stateProp.Value().(uint32); ok && state == stateCharging {
+					slog.Info("Closing last notification")
+					_, err := notifier.CloseNotification(lastNotificationID)
+					if err != nil {
+						slog.Error(err.Error())
+					}
+				}
+			}
+
+			percentageProp, exists := properties["Percentage"]
 			if !exists {
 				continue
 			}
 			var percentage float64
-			if percentage, ok = val.Value().(float64); !ok {
+			if percentage, ok = percentageProp.Value().(float64); !ok {
 				continue
 			}
 
+			obj := sysConn.Object("org.freedesktop.UPower", signal.Path)
+
 			var state uint32
-			err := sysConn.Object("org.freedesktop.UPower", signal.Path).
-				Call("org.freedesktop.DBus.Properties.Get", 0, "org.freedesktop.UPower.Device", "State").
-				Store(&state)
-			if err != nil {
+			if err := obj.Call(dbusCallPropertiesGet, 0, dbusUPowerDeviceInterface, "State").Store(&state); err != nil {
 				slog.Error(err.Error())
 				continue
 			}
 
 			var model string
-			err = sysConn.Object("org.freedesktop.UPower", signal.Path).
-				Call("org.freedesktop.DBus.Properties.Get", 0, "org.freedesktop.UPower.Device", "Model").
-				Store(&model)
-			if err != nil {
+			if err := obj.Call(dbusCallPropertiesGet, 0, dbusUPowerDeviceInterface, "Model").Store(&model); err != nil {
 				slog.Error(err.Error())
 				continue
 			}
@@ -152,7 +165,7 @@ func main() {
 			}
 
 			slog.Info("Sending notification")
-			lastNotificationID, err = notify.SendNotification(sessionConn, notification)
+			lastNotificationID, err = notifier.SendNotification(notification)
 			if err != nil {
 				slog.Error(err.Error())
 			}
