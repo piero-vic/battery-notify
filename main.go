@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log/slog"
 	"math"
@@ -41,13 +42,32 @@ var stateMap = map[uint32]string{
 	statePendingDischarge: "Pending Discharge",
 }
 
-// TODO: Use command line flags to set these
-const (
-	thresholdCritital = 15
-	thresholdLow      = 30
-)
+const usage = `Usage:
+  -c, --critical  float  Threshold for critical battery level. Default is 15.
+  -l, --low       float  Threshold for low battery level. Default is 30.
+`
 
 func main() {
+	flag.Usage = func() {
+		fmt.Fprint(os.Stderr, usage)
+	}
+
+	var (
+		thresholdCritital float64
+		thresholdLow      float64
+	)
+
+	flag.Float64Var(&thresholdLow, "l", 30, "Threshold for low battery level.")
+	flag.Float64Var(&thresholdLow, "low", 30, "Threshold for low battery level.")
+	flag.Float64Var(&thresholdCritital, "c", 15, "Threshold for critical battery level.")
+	flag.Float64Var(&thresholdCritital, "critical", 15, "Threshold for critical battery level.")
+	flag.Parse()
+
+	if flag.NArg() > 0 {
+		flag.Usage()
+		os.Exit(2)
+	}
+
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
