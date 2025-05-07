@@ -48,6 +48,13 @@ const usage = `Usage:
 `
 
 func main() {
+	if err := run(); err != nil {
+		slog.Error(err.Error())
+		os.Exit(1)
+	}
+}
+
+func run() error {
 	flag.Usage = func() {
 		fmt.Fprint(os.Stderr, usage)
 	}
@@ -65,7 +72,7 @@ func main() {
 
 	if flag.NArg() > 0 {
 		flag.Usage()
-		os.Exit(2)
+		return nil
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -73,22 +80,19 @@ func main() {
 
 	sysConn, err := dbus.SystemBus()
 	if err != nil {
-		slog.Error(err.Error())
-		os.Exit(1)
+		return err
 	}
 	defer sysConn.Close()
 
 	sessionConn, err := dbus.SessionBus()
 	if err != nil {
-		slog.Error(err.Error())
-		os.Exit(1)
+		return err
 	}
 	defer sessionConn.Close()
 
 	notifier, err := notify.New(sessionConn)
 	if err != nil {
-		slog.Error(err.Error())
-		os.Exit(1)
+		return err
 	}
 
 	signalChan := make(chan *dbus.Signal, 10)
@@ -100,8 +104,7 @@ func main() {
 		dbus.WithMatchMember("PropertiesChanged"),
 	)
 	if err != nil {
-		slog.Error(err.Error())
-		os.Exit(1)
+		return err
 	}
 
 	var lastNotificationID uint32
@@ -112,7 +115,7 @@ func main() {
 		select {
 		case <-ctx.Done():
 			slog.Info("Quitting")
-			os.Exit(1)
+			return nil
 		case signal := <-signalChan:
 			// Handling signal body format
 			if len(signal.Body) < 2 {
